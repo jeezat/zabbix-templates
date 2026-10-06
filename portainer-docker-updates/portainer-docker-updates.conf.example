@@ -1,0 +1,13 @@
+# Diese Datei wird als vertrauenswürdiger Bash-Code eingelesen. Nur root darf sie
+# verändern; für root:zabbix wird Modus 0640 empfohlen.
+PORTAINER_URL="https://portainer.example.local"
+PORTAINER_API_KEY_FILE="/etc/zabbix/portainer-api-key"
+PORTAINER_ENVIRONMENTS="1:docker01,2:docker02"
+VERIFY_TLS="true"
+CA_FILE=""
+CONNECT_TIMEOUT="10"
+REQUEST_TIMEOUT="30"
+INCLUDE_STOPPED="false"
+CONTAINER_INCLUDE_REGEX=""
+CONTAINER_EXCLUDE_REGEX=""
+IMAGE_EXCLUDE_REGEX=""

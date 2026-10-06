@@ -1,0 +1,424 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 9d7e090721894c4c98a7d3d655515e9b
+      name: 'Templates/Applications'
+  templates:
+    - uuid: 31ed3bf9c47845ee9f4e84a3ba4e6e28
+      template: 'Portainer Docker Image Updates'
+      name: 'Portainer Docker Image Updates'
+      description: |
+        Read-only monitoring of Docker image update status through Portainer.
+        Requires Portainer Business Edition exposing the container image-status API.
+        Configuration and API credentials remain on the Zabbix server or proxy.
+      groups:
+        - name: 'Templates/Applications'
+      items:
+        - uuid: d7d8d70dcf4248b3a39e38bcdef48e85
+          name: 'Portainer image update check: Raw JSON'
+          type: EXTERNAL
+          key: portainer_docker_updates.sh
+          delay: 10m
+          history: 7d
+          value_type: TEXT
+          trends: '0'
+          description: 'Complete JSON document returned by the external check.'
+          tags:
+            - tag: component
+              value: docker
+            - tag: component
+              value: portainer
+            - tag: scope
+              value: update
+          triggers:
+            - uuid: 0ea3c09c98ed48229eccb484b89f7c06
+              expression: 'nodata(/Portainer Docker Image Updates/portainer_docker_updates.sh,30m)=1'
+              name: 'Portainer update check has no data for 30 minutes'
+              priority: AVERAGE
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: b657768ea46c454db598499411cd8e70
+          name: 'Portainer image update check: Overall status'
+          type: DEPENDENT
+          key: portainer.updates.status
+          history: 30d
+          value_type: UNSIGNED
+          valuemap:
+            name: 'Portainer check status'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.status
+            - type: JAVASCRIPT
+              parameters:
+                - 'var map = {ok:0,warning:1,error:2}; return map[value] !== undefined ? map[value] : 2;'
+          master_item:
+            key: portainer_docker_updates.sh
+          tags:
+            - tag: component
+              value: portainer
+            - tag: scope
+              value: availability
+          triggers:
+            - uuid: d85d5b27a9ad4c068453d458490d285b
+              expression: 'last(/Portainer Docker Image Updates/portainer.updates.status)>0'
+              name: 'Portainer API or update-check script reports errors'
+              priority: AVERAGE
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 0e5436a045ce48aca4223e864a48943d
+          name: 'Portainer image update check: Last check (UTC)'
+          type: DEPENDENT
+          key: portainer.updates.checked_at
+          history: 30d
+          value_type: CHAR
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.checked_at
+          master_item:
+            key: portainer_docker_updates.sh
+          tags:
+            - tag: component
+              value: portainer
+        - uuid: 9bcac400934241348d9e77082d177eef
+          name: 'Portainer image update check: Available updates'
+          type: DEPENDENT
+          key: portainer.updates.total
+          history: 90d
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.total_updates
+          master_item:
+            key: portainer_docker_updates.sh
+          tags:
+            - tag: component
+              value: docker
+            - tag: scope
+              value: update
+          triggers:
+            - uuid: c38c97938e554ec58aebd8432bf7a22e
+              expression: 'last(/Portainer Docker Image Updates/portainer.updates.total)>0'
+              name: 'At least one Docker image update is available'
+              priority: WARNING
+              tags:
+                - tag: scope
+                  value: update
+        - uuid: b14fc7144d4a4775a161ac8d23f4bd7a
+          name: 'Portainer image update check: Errors'
+          type: DEPENDENT
+          key: portainer.updates.errors
+          history: 90d
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.total_errors
+          master_item:
+            key: portainer_docker_updates.sh
+          tags:
+            - tag: component
+              value: portainer
+            - tag: scope
+              value: availability
+      discovery_rules:
+        - uuid: 0f9547e4664140aa80766d55a9fabf2c
+          name: 'Portainer environments discovery'
+          type: DEPENDENT
+          key: portainer.environments.discovery
+          lifetime: 30d
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var source = JSON.parse(value);
+                  return JSON.stringify(source.environments.map(function (environment) {
+                    return {
+                      '{#ENVIRONMENT_ID}': String(environment.id),
+                      '{#ENVIRONMENT_NAME}': String(environment.name)
+                    };
+                  }));
+          master_item:
+            key: portainer_docker_updates.sh
+          item_prototypes:
+            - uuid: 37f3a9d6d4af49dc9acd54a6ad8955db
+              name: 'Environment {#ENVIRONMENT_NAME}: Updates'
+              type: DEPENDENT
+              key: 'portainer.env.updates[{#ENVIRONMENT_ID}]'
+              history: 90d
+              value_type: UNSIGNED
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value), id = '{#ENVIRONMENT_ID}';
+                      var row;
+                      for (var i = 0; i < data.environments.length; i++) {
+                        if (String(data.environments[i].id) === id) { row = data.environments[i]; break; }
+                      }
+                      if (!row) { throw 'Environment not found'; }
+                      return row.updates;
+              master_item:
+                key: portainer_docker_updates.sh
+              tags:
+                - tag: component
+                  value: docker
+                - tag: environment
+                  value: '{#ENVIRONMENT_NAME}'
+                - tag: scope
+                  value: update
+            - uuid: 79ca8585041748039c0a9a960d996093
+              name: 'Environment {#ENVIRONMENT_NAME}: Errors'
+              type: DEPENDENT
+              key: 'portainer.env.errors[{#ENVIRONMENT_ID}]'
+              history: 90d
+              value_type: UNSIGNED
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value), id = '{#ENVIRONMENT_ID}';
+                      var row;
+                      for (var i = 0; i < data.environments.length; i++) {
+                        if (String(data.environments[i].id) === id) { row = data.environments[i]; break; }
+                      }
+                      if (!row) { throw 'Environment not found'; }
+                      return row.errors;
+              master_item:
+                key: portainer_docker_updates.sh
+              tags:
+                - tag: component
+                  value: portainer
+                - tag: environment
+                  value: '{#ENVIRONMENT_NAME}'
+                - tag: scope
+                  value: availability
+            - uuid: 384a6e7f27bc4a8f9784ae5db81286ad
+              name: 'Environment {#ENVIRONMENT_NAME}: Status'
+              type: DEPENDENT
+              key: 'portainer.env.status[{#ENVIRONMENT_ID}]'
+              history: 90d
+              value_type: UNSIGNED
+              valuemap:
+                name: 'Portainer check status'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value), id = '{#ENVIRONMENT_ID}';
+                      var row, map = {ok:0,warning:1,error:2};
+                      for (var i = 0; i < data.environments.length; i++) {
+                        if (String(data.environments[i].id) === id) { row = data.environments[i]; break; }
+                      }
+                      if (!row) { throw 'Environment not found'; }
+                      return map[row.status] !== undefined ? map[row.status] : 2;
+              master_item:
+                key: portainer_docker_updates.sh
+              tags:
+                - tag: component
+                  value: portainer
+                - tag: environment
+                  value: '{#ENVIRONMENT_NAME}'
+                - tag: scope
+                  value: availability
+          trigger_prototypes:
+            - uuid: 8bb8c6d18c834b44a86a27927dd940bb
+              expression: 'last(/Portainer Docker Image Updates/portainer.env.status[{#ENVIRONMENT_ID}])=2'
+              name: 'Portainer environment {#ENVIRONMENT_NAME} could not be checked'
+              priority: AVERAGE
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 6a3332fe19f144eb9027184d69cc92fa
+          name: 'Portainer containers discovery'
+          type: DEPENDENT
+          key: portainer.containers.discovery
+          lifetime: 30d
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var source = JSON.parse(value), result = [];
+                  source.environments.forEach(function (environment) {
+                    environment.containers.forEach(function (container) {
+                      result.push({
+                        '{#ENVIRONMENT_ID}': String(environment.id),
+                        '{#ENVIRONMENT_NAME}': String(environment.name),
+                        '{#CONTAINER_ID}': String(container.id),
+                        '{#CONTAINER_NAME}': String(container.name),
+                        '{#IMAGE}': String(container.image)
+                      });
+                    });
+                  });
+                  return JSON.stringify(result);
+          master_item:
+            key: portainer_docker_updates.sh
+          item_prototypes:
+            - uuid: c2b55904e07e4aee857bd86de14a4e58
+              name: '{#ENVIRONMENT_NAME}: {#CONTAINER_NAME}: Image status'
+              type: DEPENDENT
+              key: 'portainer.container.status[{#ENVIRONMENT_ID},{#CONTAINER_ID}]'
+              history: 90d
+              value_type: UNSIGNED
+              valuemap:
+                name: 'Portainer container image status'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value), eid = '{#ENVIRONMENT_ID}', cid = '{#CONTAINER_ID}';
+                      var env, row, map = {updated:0,outdated:1,unknown:2,error:3,excluded:4};
+                      for (var i = 0; i < data.environments.length; i++) {
+                        if (String(data.environments[i].id) === eid) { env = data.environments[i]; break; }
+                      }
+                      if (env) for (var j = 0; j < env.containers.length; j++) {
+                        if (String(env.containers[j].id) === cid) { row = env.containers[j]; break; }
+                      }
+                      if (!row) { throw 'Container not found'; }
+                      return map[row.status] !== undefined ? map[row.status] : 2;
+              master_item:
+                key: portainer_docker_updates.sh
+              tags:
+                - tag: component
+                  value: docker
+                - tag: environment
+                  value: '{#ENVIRONMENT_NAME}'
+                - tag: scope
+                  value: update
+            - uuid: eafcb38db9e44947b7af9a9d2383f768
+              name: '{#ENVIRONMENT_NAME}: {#CONTAINER_NAME}: Update available'
+              type: DEPENDENT
+              key: 'portainer.container.update[{#ENVIRONMENT_ID},{#CONTAINER_ID}]'
+              history: 90d
+              value_type: UNSIGNED
+              valuemap:
+                name: 'Boolean'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value), eid = '{#ENVIRONMENT_ID}', cid = '{#CONTAINER_ID}';
+                      var env, row;
+                      for (var i = 0; i < data.environments.length; i++) {
+                        if (String(data.environments[i].id) === eid) { env = data.environments[i]; break; }
+                      }
+                      if (env) for (var j = 0; j < env.containers.length; j++) {
+                        if (String(env.containers[j].id) === cid) { row = env.containers[j]; break; }
+                      }
+                      if (!row) { throw 'Container not found'; }
+                      return row.update_available ? 1 : 0;
+              master_item:
+                key: portainer_docker_updates.sh
+              tags:
+                - tag: component
+                  value: docker
+                - tag: environment
+                  value: '{#ENVIRONMENT_NAME}'
+                - tag: scope
+                  value: update
+            - uuid: 99accf0bbd31478cbcb94ecdf1480bed
+              name: '{#ENVIRONMENT_NAME}: {#CONTAINER_NAME}: Container name'
+              type: DEPENDENT
+              key: 'portainer.container.name[{#ENVIRONMENT_ID},{#CONTAINER_ID}]'
+              history: 30d
+              value_type: CHAR
+              trends: '0'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value), eid = '{#ENVIRONMENT_ID}', cid = '{#CONTAINER_ID}';
+                      var env, row;
+                      for (var i = 0; i < data.environments.length; i++) {
+                        if (String(data.environments[i].id) === eid) { env = data.environments[i]; break; }
+                      }
+                      if (env) for (var j = 0; j < env.containers.length; j++) {
+                        if (String(env.containers[j].id) === cid) { row = env.containers[j]; break; }
+                      }
+                      if (!row) { throw 'Container not found'; }
+                      return row.name;
+              master_item:
+                key: portainer_docker_updates.sh
+              tags:
+                - tag: component
+                  value: docker
+                - tag: environment
+                  value: '{#ENVIRONMENT_NAME}'
+            - uuid: 93b71bbd5bbd43a8aa6f161b7f6dcd80
+              name: '{#ENVIRONMENT_NAME}: {#CONTAINER_NAME}: Image name'
+              type: DEPENDENT
+              key: 'portainer.container.image[{#ENVIRONMENT_ID},{#CONTAINER_ID}]'
+              history: 30d
+              value_type: CHAR
+              trends: '0'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value), eid = '{#ENVIRONMENT_ID}', cid = '{#CONTAINER_ID}';
+                      var env, row;
+                      for (var i = 0; i < data.environments.length; i++) {
+                        if (String(data.environments[i].id) === eid) { env = data.environments[i]; break; }
+                      }
+                      if (env) for (var j = 0; j < env.containers.length; j++) {
+                        if (String(env.containers[j].id) === cid) { row = env.containers[j]; break; }
+                      }
+                      if (!row) { throw 'Container not found'; }
+                      return row.image;
+              master_item:
+                key: portainer_docker_updates.sh
+              tags:
+                - tag: component
+                  value: docker
+                - tag: environment
+                  value: '{#ENVIRONMENT_NAME}'
+          trigger_prototypes:
+            - uuid: 19f60bfb828442709486149563dcc894
+              expression: 'count(/Portainer Docker Image Updates/portainer.container.status[{#ENVIRONMENT_ID},{#CONTAINER_ID}],30m,"eq",2)>=3'
+              name: '{#ENVIRONMENT_NAME}: Image status of {#CONTAINER_NAME} remains unknown'
+              priority: WARNING
+              tags:
+                - tag: scope
+                  value: update
+      tags:
+        - tag: component
+          value: docker
+        - tag: component
+          value: portainer
+        - tag: scope
+          value: update
+      valuemaps:
+        - uuid: bbc0ba59d46f4a46ae60830796c2b875
+          name: 'Portainer check status'
+          mappings:
+            - value: '0'
+              newvalue: OK
+            - value: '1'
+              newvalue: Warning
+            - value: '2'
+              newvalue: Error
+        - uuid: c483085efb114297adf39379dd5a5897
+          name: 'Portainer container image status'
+          mappings:
+            - value: '0'
+              newvalue: Updated
+            - value: '1'
+              newvalue: Outdated
+            - value: '2'
+              newvalue: Unknown
+            - value: '3'
+              newvalue: Error
+            - value: '4'
+              newvalue: Excluded
+        - uuid: f2723a3bc0124f4aac6895801995dd25
+          name: 'Boolean'
+          mappings:
+            - value: '0'
+              newvalue: 'No'
+            - value: '1'
+              newvalue: 'Yes'
